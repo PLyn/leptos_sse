@@ -4,7 +4,7 @@
 use std::borrow::Cow;
 
 use json_patch::Patch;
-use leptos::{create_signal, ReadSignal};
+use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use wasm_bindgen::JsValue;
@@ -70,8 +70,7 @@ impl ServerSignalUpdate {
 /// # Example
 ///
 /// ``` 
-/// use leptos::component;
-/// use leptos::IntoView;
+/// use leptos::prelude::*;
 /// #[component]
 /// pub fn App() -> impl IntoView {
 ///     // Provide SSE connection
@@ -95,11 +94,8 @@ pub fn provide_sse(url: &str) -> Result<(), JsValue> {
 /// ```
 /// use serde::Serialize;
 /// use serde::Deserialize;
-/// use leptos::view;
-/// use leptos::component;
-/// use leptos::IntoView;
+/// use leptos::prelude::*;
 /// use leptos_sse::create_sse_signal;
-/// use leptos::SignalGet;
 /// #[derive(Clone, Default, Serialize, Deserialize)]
 /// pub struct Count {
 ///     pub value: i32,
@@ -121,11 +117,11 @@ where
     T: Default + Serialize + for<'de> Deserialize<'de>,
 {
     let name = name.into();
-    let (get, set) = create_signal(T::default());
+    let (get, set) = signal(T::default());
 
     cfg_if::cfg_if! {
         if #[cfg(target_arch = "wasm32")] {
-            use leptos::{use_context, create_effect, create_rw_signal, SignalSet, SignalGet};
+            use leptos::prelude::*;
 
             let signal = create_rw_signal(serde_json::to_value(T::default()).unwrap());
             if let Some(ServerSignalEventSourceContext { state_signals, .. }) = use_context::<ServerSignalEventSourceContext>() {
@@ -163,7 +159,7 @@ cfg_if::cfg_if! {
         use std::rc::Rc;
 
         use web_sys::EventSource;
-        use leptos::{provide_context, RwSignal};
+        use leptos::prelude::*;
 
         /// Provides the context for the server signal `web_sys::EventSource`.
         ///
@@ -204,7 +200,7 @@ cfg_if::cfg_if! {
         fn provide_sse_inner(url: &str) -> Result<(), JsValue> {
             use web_sys::MessageEvent;
             use wasm_bindgen::{prelude::Closure, JsCast};
-            use leptos::{use_context, SignalUpdate};
+            use leptos::prelude::*;
             use js_sys::{Function, JsString};
 
             if use_context::<ServerSignalEventSourceContext>().is_none() {

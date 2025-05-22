@@ -45,7 +45,7 @@ ssr = [
 **Client**
 
 ```rust
-use leptos::*;
+use leptos::prelude::*;
 use leptos_sse::create_sse_signal;
 use serde::{Deserialize, Serialize};
 
