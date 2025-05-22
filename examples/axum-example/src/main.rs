@@ -7,7 +7,7 @@ async fn main() {
     };
     use axum_example::app::*;
     use axum_example::fileserv::file_and_error_handler;
-    use leptos::*;
+    use leptos::prelude::*;
     use leptos_axum::{generate_route_list, LeptosRoutes};
     use tower_http::cors::CorsLayer;
     use tower_http::cors::Any;
@@ -42,7 +42,7 @@ async fn main() {
 
     // run our app with hyper
     // `axum::Server` is a re-export of `hyper::Server`
-    leptos::logging::log!("listening on http://{}", &addr);
+    leptos::prelude::logging::log!("listening on http://{}", &addr);
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     axum::serve(listener, app.into_make_service())
         .await

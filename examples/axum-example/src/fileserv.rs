@@ -10,7 +10,7 @@ cfg_if! { if #[cfg(feature = "ssr")] {
     use axum::response::Response as AxumResponse;
     use tower::util::ServiceExt;
     use tower_http::services::ServeDir;
-    use leptos::{LeptosOptions};
+    use leptos::prelude::{LeptosOptions};
 
 
     pub async fn file_and_error_handler(uri: Uri, State(options): State<LeptosOptions>, _req: Request<Body>) -> AxumResponse {
