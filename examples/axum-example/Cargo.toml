@@ -11,18 +11,18 @@ axum = { version = "0.7", optional = true }
 console_error_panic_hook = "0.1"
 console_log = "1"
 cfg-if = "1"
-futures = { version = "0.3.28", default-features = false, optional = true }
+futures = { version = "0.3", default-features = false, optional = true }
 leptos = { version = "0.6", default-features = false, features = ["serde"] }
 leptos_axum = { version = "0.6", optional = true }
 leptos_sse = { path = "../.." }
 log = "0.4"
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
 simple_logger = "4"
-tokio = { version = "1.36", features = ["rt", "macros", "rt-multi-thread"], optional = true }
-tokio-stream = { version = "0.1.14", optional = true }
-tower = { version = "0.4", optional = true }
-tower-http = { version = "0.5", features = ["fs"], optional = true }
-wasm-bindgen = "0.2"
+tokio = { version = "1", features = ["rt", "macros", "rt-multi-thread"], optional = true }
+tokio-stream = { version = "0.1", optional = true }
+tower = { version = "0.5", features = ["util"],optional = true }
+tower-http = { version = "0.6", features = ["fs", "cors"], optional = true }
+wasm-bindgen = "0.2.100"
 http = "1.0"
 
 [features]
