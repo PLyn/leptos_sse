@@ -9,6 +9,8 @@ async fn main() {
     use axum_example::fileserv::file_and_error_handler;
     use leptos::*;
     use leptos_axum::{generate_route_list, LeptosRoutes};
+    use tower_http::cors::CorsLayer;
+    use tower_http::cors::Any;
 
     simple_logger::init_with_level(log::Level::Debug).expect("couldn't initialize logging");
 
@@ -26,6 +28,14 @@ async fn main() {
     let app = Router::new()
         .route("/api/*fn_name", post(leptos_axum::handle_server_fns))
         .route("/sse", get(handle_sse))
+        .layer(
+            // For development, allowing all is often simplest
+            // In production, be more specific with `allow_origin` etc.
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods(Any)
+                .allow_headers(Any)
+        )
         .leptos_routes(&leptos_options, routes, || view! { <App/> })
         .fallback(file_and_error_handler)
         .with_state(leptos_options);

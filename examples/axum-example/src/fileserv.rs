@@ -8,7 +8,7 @@ cfg_if! { if #[cfg(feature = "ssr")] {
         http::{Request, Response, StatusCode, Uri},
     };
     use axum::response::Response as AxumResponse;
-    use tower::ServiceExt;
+    use tower::util::ServiceExt;
     use tower_http::services::ServeDir;
     use leptos::{LeptosOptions};
 
