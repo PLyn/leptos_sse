@@ -69,7 +69,9 @@ impl ServerSignalUpdate {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ``` 
+/// use leptos::component;
+/// use leptos::IntoView;
 /// #[component]
 /// pub fn App() -> impl IntoView {
 ///     // Provide SSE connection
@@ -91,6 +93,13 @@ pub fn provide_sse(url: &str) -> Result<(), JsValue> {
 /// # Example
 ///
 /// ```
+/// use serde::Serialize;
+/// use serde::Deserialize;
+/// use leptos::view;
+/// use leptos::component;
+/// use leptos::IntoView;
+/// use leptos_sse::create_sse_signal;
+/// use leptos::SignalGet;
 /// #[derive(Clone, Default, Serialize, Deserialize)]
 /// pub struct Count {
 ///     pub value: i32,
@@ -102,7 +111,7 @@ pub fn provide_sse(url: &str) -> Result<(), JsValue> {
 ///     let count = create_sse_signal::<Count>("counter");
 ///
 ///     view! {
-///         <h1>"Count: " {move || count().value.to_string()}</h1>
+///         <h1>"Count: " {move || count.get().value.to_string() }</h1>
 ///     }
 /// }
 /// ```
