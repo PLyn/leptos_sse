@@ -9,13 +9,20 @@ pub struct Count {
 
 #[component]
 pub fn App() -> impl IntoView {
-    // Provide websocket connection
-    leptos_sse::provide_sse("http://localhost:3000/sse").unwrap();
-
-    // Create sse signal
+    // Provide SSE connection immediately when the app component is created
+    // This needs to happen before any signals are created
+    let _ = leptos_sse::provide_sse("/sse");
+    
+    // Create sse signal after SSE is provided
     let count = create_sse_signal::<Count>("counter");
 
     view! {
-        <h1>"Count: " {move || count.get().value.to_string()}</h1>
+        <div>
+            <h1>"Count: " {move || count.get().value.to_string()}</h1>
+            <p>"The count should update every second."</p>
+            <p style="color: #666; font-size: 0.9em;">
+                "If not updating, check the Network tab for an active EventStream connection to /sse"
+            </p>
+        </div>
     }
 }

@@ -13,8 +13,7 @@ cfg_if! { if #[cfg(feature = "hydrate")] {
         _ = console_log::init_with_level(log::Level::Debug);
         console_error_panic_hook::set_once();
 
-        leptos::prelude::mount_to_body(move || {
-            view! { <App/> }
-        });
+        // Updated for Leptos 0.7 - use hydrate_body instead of mount_to_body
+        leptos::mount::hydrate_body(App);
     }
 }}

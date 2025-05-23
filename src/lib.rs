@@ -89,6 +89,8 @@ pub fn provide_sse(url: &str) -> Result<(), JsValue> {
 /// This signal is initialized as T::default, is read-only on the client, and is updated through json patches
 /// sent through a SSE connection.
 ///
+/// For types that are not Send + Sync, use [`create_sse_signal_local`] instead.
+///
 /// # Example
 ///
 /// ```
@@ -114,30 +116,76 @@ pub fn provide_sse(url: &str) -> Result<(), JsValue> {
 #[allow(unused_variables)]
 pub fn create_sse_signal<T>(name: impl Into<Cow<'static, str>>) -> ReadSignal<T>
 where
-    T: Default + Serialize + for<'de> Deserialize<'de>,
+    T: Default + Serialize + for<'de> Deserialize<'de> + Send + Sync + 'static,
 {
     let name = name.into();
     let (get, set) = signal(T::default());
+    
+    #[cfg(target_arch = "wasm32")]
+    setup_sse_signal(name, set);
 
-    cfg_if::cfg_if! {
-        if #[cfg(target_arch = "wasm32")] {
+    get
+}
+
+/// Creates a signal which is controlled by the server for types that are not Send + Sync.
+///
+/// This is the same as [`create_sse_signal`] but uses LocalStorage for signals that don't
+/// implement Send + Sync.
+#[allow(unused_variables)]
+pub fn create_sse_signal_local<T>(name: impl Into<Cow<'static, str>>) -> ReadSignal<T, LocalStorage>
+where
+    T: Default + Serialize + for<'de> Deserialize<'de> + 'static,
+{
+    let name = name.into();
+    let (get, set) = signal_local(T::default());
+    
+    #[cfg(target_arch = "wasm32")]
+    setup_sse_signal_local(name, set);
+
+    get
+}
+
+cfg_if::cfg_if! {
+    if #[cfg(target_arch = "wasm32")] {
+        use std::collections::HashMap;
+        use std::rc::Rc;
+        use std::cell::RefCell;
+        use std::sync::{Arc, Mutex};
+
+        use web_sys::EventSource;
+        use leptos::prelude::*;
+
+        // Thread-local storage for EventSource since it's not Send + Sync
+        thread_local! {
+            static EVENT_SOURCE: RefCell<Option<EventSource>> = RefCell::new(None);
+            static STATE_SIGNALS: RefCell<HashMap<Cow<'static, str>, RwSignal<Value>>> = RefCell::new(HashMap::new());
+            static STATE_SIGNALS_LOCAL: RefCell<HashMap<Cow<'static, str>, RwSignal<Value, LocalStorage>>> = RefCell::new(HashMap::new());
+            static DELAYED_UPDATES: RefCell<HashMap<Cow<'static, str>, Vec<Patch>>> = RefCell::new(HashMap::new());
+        }
+
+        /// Context marker to indicate SSE has been initialized
+        #[derive(Clone, Debug, PartialEq, Eq)]
+        struct SseInitialized;
+
+        fn setup_sse_signal<T>(name: Cow<'static, str>, set: WriteSignal<T>)
+        where
+            T: Default + Serialize + for<'de> Deserialize<'de> + Send + Sync + 'static,
+        {
             use leptos::prelude::*;
 
-            let signal = create_rw_signal(serde_json::to_value(T::default()).unwrap());
-            if let Some(ServerSignalEventSourceContext { state_signals, .. }) = use_context::<ServerSignalEventSourceContext>() {
-                let name: Cow<'static, str> = name.into();
-                state_signals.borrow_mut().insert(name.clone(), signal);
+            let signal = RwSignal::new(serde_json::to_value(T::default()).unwrap());
+            
+            if use_context::<SseInitialized>().is_some() {
+                leptos::logging::log!("Setting up SSE signal: {}", name);
+                
+                STATE_SIGNALS.with(|signals| {
+                    signals.borrow_mut().insert(name.clone(), signal);
+                });
 
-                // Note: The leptos docs advise against doing this. It seems to work
-                // well in testing, and the primary caveats are around unnecessary
-                // updates firing, but our state synchronization already prevents
-                // that on the server side
-                create_effect(move |_| {
-                    let name = name.clone();
+                Effect::new(move |_| {
                     let new_value = serde_json::from_value(signal.get()).unwrap();
                     set.set(new_value);
                 });
-
             } else {
                 leptos::logging::error!(
                     r#"server signal was used without a SSE being provided.
@@ -146,54 +194,31 @@ Ensure you call `leptos_sse::provide_sse("http://localhost:3000/sse")` at the hi
                 );
             }
         }
-    }
 
-    get
-}
+        fn setup_sse_signal_local<T>(name: Cow<'static, str>, set: WriteSignal<T, LocalStorage>)
+        where
+            T: Default + Serialize + for<'de> Deserialize<'de> + 'static,
+        {
+            use leptos::prelude::*;
 
-cfg_if::cfg_if! {
-    if #[cfg(target_arch = "wasm32")] {
-        use std::cell::RefCell;
-        use std::collections::HashMap;
-        use std::ops::{Deref, DerefMut};
-        use std::rc::Rc;
+            let signal = RwSignal::new_local(serde_json::to_value(T::default()).unwrap());
+            
+            if use_context::<SseInitialized>().is_some() {
+                STATE_SIGNALS_LOCAL.with(|signals| {
+                    signals.borrow_mut().insert(name.clone(), signal);
+                });
 
-        use web_sys::EventSource;
-        use leptos::prelude::*;
+                Effect::new(move |_| {
+                    let new_value = serde_json::from_value(signal.get()).unwrap();
+                    set.set(new_value);
+                });
+            } else {
+                leptos::logging::error!(
+                    r#"server signal was used without a SSE being provided.
 
-        /// Provides the context for the server signal `web_sys::EventSource`.
-        ///
-        /// You can use this via `use_context::<ServerSignalEventSource>()` to
-        /// access the `EventSource` to set up additional event listeners and etc.
-        #[derive(Clone, Debug, PartialEq, Eq)]
-        pub struct ServerSignalEventSource(pub EventSource);
-
-        impl Deref for ServerSignalEventSource {
-            type Target = EventSource;
-
-            fn deref(&self) -> &Self::Target {
-                &self.0
+Ensure you call `leptos_sse::provide_sse("http://localhost:3000/sse")` at the highest level in your app."#
+                );
             }
-        }
-
-        impl DerefMut for ServerSignalEventSource {
-            fn deref_mut(&mut self) -> &mut Self::Target {
-                &mut self.0
-            }
-        }
-
-        #[derive(Clone, Debug, PartialEq, Eq)]
-        struct ServerSignalEventSourceContext {
-            inner: EventSource,
-            // References to these are kept by the closure for the callback
-            // onmessage callback on the event source
-            state_signals: Rc<RefCell<HashMap<Cow<'static, str>, RwSignal<Value>>>>,
-            // When the event source is first established, leptos may not have
-            // completed the traversal that sets up all of the state signals.
-            // Without that, we don't have a base state to apply the patches to,
-            // and therefore we must keep a record of the patches to apply after
-            // the state has been set up.
-            delayed_updates: Rc<RefCell<HashMap<Cow<'static, str>, Vec<Patch>>>>,
         }
 
         #[inline]
@@ -203,45 +228,138 @@ cfg_if::cfg_if! {
             use leptos::prelude::*;
             use js_sys::{Function, JsString};
 
-            if use_context::<ServerSignalEventSourceContext>().is_none() {
-                let es = EventSource::new(url)?;
-                provide_context(ServerSignalEventSource(es.clone()));
-                provide_context(ServerSignalEventSourceContext { inner: es, state_signals: Default::default(), delayed_updates: Default::default() });
+            // Only initialize once
+            if use_context::<SseInitialized>().is_some() {
+                leptos::logging::log!("SSE already initialized");
+                return Ok(());
             }
 
-            let es = use_context::<ServerSignalEventSourceContext>().unwrap();
-            let handlers = es.state_signals.clone();
-            let delayed_updates = es.delayed_updates.clone();
-            let callback = Closure::wrap(Box::new(move |event: MessageEvent| {
-                let ws_string = event.data().dyn_into::<JsString>().unwrap().as_string().unwrap();
-                if let Ok(update_signal) = serde_json::from_str::<ServerSignalUpdate>(&ws_string) {
-                    let handler_map = (*handlers).borrow();
-                    let name = &update_signal.name;
-                    let mut delayed_map = (*delayed_updates).borrow_mut();
-                    if let Some(signal) = handler_map.get(name) {
-                        if let Some(delayed_patches) = delayed_map.remove(name) {
-                            signal.update(|doc| {
-                                for patch in delayed_patches {
-                                    json_patch::patch(doc, &patch).unwrap();
+            leptos::logging::log!("Initializing SSE connection to: {}", url);
+            
+            let es = EventSource::new(url)?;
+            
+            // Add event listeners for debugging
+            {
+                use wasm_bindgen::JsCast;
+                
+                // Log when connection opens
+                let onopen = Closure::wrap(Box::new(move || {
+                    leptos::logging::log!("SSE connection opened successfully");
+                }) as Box<dyn Fn()>);
+                es.set_onopen(Some(onopen.as_ref().unchecked_ref()));
+                onopen.forget();
+                
+                // Log errors
+                let onerror = Closure::wrap(Box::new(move |_event: web_sys::Event| {
+                    leptos::logging::error!("SSE connection error occurred");
+                }) as Box<dyn Fn(_)>);
+                es.set_onerror(Some(onerror.as_ref().unchecked_ref()));
+                onerror.forget();
+            }
+            
+            // Store the EventSource
+            EVENT_SOURCE.with(|source| {
+                *source.borrow_mut() = Some(es);
+            });
+            
+            // Set up the message handler
+            EVENT_SOURCE.with(|source| {
+                if let Some(es) = source.borrow().as_ref() {
+                    let callback = Closure::wrap(Box::new(move |event: MessageEvent| {
+                        leptos::logging::log!("SSE message received");
+                        let ws_string = event.data().dyn_into::<JsString>().unwrap().as_string().unwrap();
+                        leptos::logging::log!("SSE data: {}", &ws_string);
+                        if let Ok(update_signal) = serde_json::from_str::<ServerSignalUpdate>(&ws_string) {
+                            let name = &update_signal.name;
+                            
+                            // Try sync signals first
+                            let handled = STATE_SIGNALS.with(|signals| {
+                                let handler_map = signals.borrow();
+                                if let Some(signal) = handler_map.get(name) {
+                                    // Apply any delayed patches first
+                                    DELAYED_UPDATES.with(|delayed| {
+                                        let mut delayed_map = delayed.borrow_mut();
+                                        if let Some(delayed_patches) = delayed_map.remove(name) {
+                                            signal.update(|doc| {
+                                                for patch in delayed_patches {
+                                                    json_patch::patch(doc, &patch).unwrap();
+                                                }
+                                            });
+                                        }
+                                    });
+                                    
+                                    // Apply the current patch
+                                    signal.update(|doc| {
+                                        json_patch::patch(doc, &update_signal.patch).unwrap();
+                                    });
+                                    true
+                                } else {
+                                    false
                                 }
                             });
+                            
+                            // If not found in sync signals, try local signals
+                            if !handled {
+                                let handled_local = STATE_SIGNALS_LOCAL.with(|signals| {
+                                    let handler_map = signals.borrow();
+                                    if let Some(signal) = handler_map.get(name) {
+                                        // Apply any delayed patches first
+                                        DELAYED_UPDATES.with(|delayed| {
+                                            let mut delayed_map = delayed.borrow_mut();
+                                            if let Some(delayed_patches) = delayed_map.remove(name) {
+                                                signal.update(|doc| {
+                                                    for patch in delayed_patches {
+                                                        json_patch::patch(doc, &patch).unwrap();
+                                                    }
+                                                });
+                                            }
+                                        });
+                                        
+                                        // Apply the current patch
+                                        signal.update(|doc| {
+                                            json_patch::patch(doc, &update_signal.patch).unwrap();
+                                        });
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                });
+                                
+                                if !handled_local {
+                                    leptos::logging::warn!("No local state for update to {}. Queuing patch.", name);
+                                    DELAYED_UPDATES.with(|delayed| {
+                                        let mut delayed_map = delayed.borrow_mut();
+                                        delayed_map.entry(name.clone()).or_default().push(update_signal.patch.clone());
+                                    });
+                                }
+                            }
                         }
-                        signal.update(|doc| {
-                            json_patch::patch(doc, &update_signal.patch).unwrap();
-                        });
-                    } else {
-                        leptos::logging::warn!("No local state for update to {}. Queuing patch.", name);
-                        delayed_map.entry(name.clone()).or_default().push(update_signal.patch.clone());
-                    }
-                }
-            }) as Box<dyn FnMut(_)>);
-            let function: &Function = callback.as_ref().unchecked_ref();
-            es.inner.set_onmessage(Some(function));
+                    }) as Box<dyn FnMut(_)>);
+                    
+                    let function: &Function = callback.as_ref().unchecked_ref();
+                    es.set_onmessage(Some(function));
 
-            // Keep the closure alive for the lifetime of the program
-            callback.forget();
+                    // Keep the closure alive for the lifetime of the program
+                    callback.forget();
+                    
+                    leptos::logging::log!("SSE message handler installed");
+                }
+            });
+            
+            // Mark SSE as initialized AFTER setting up the handler
+            provide_context(SseInitialized);
 
             Ok(())
+        }
+
+        /// Provides access to the underlying EventSource for advanced use cases
+        pub fn with_event_source<F, R>(f: F) -> Option<R>
+        where
+            F: FnOnce(&EventSource) -> R,
+        {
+            EVENT_SOURCE.with(|source| {
+                source.borrow().as_ref().map(|es| f(es))
+            })
         }
     } else {
         #[inline]
